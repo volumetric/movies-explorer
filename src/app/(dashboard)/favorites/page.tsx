@@ -137,7 +137,7 @@ export default function FavoritesPage() {
               key={movie._id}
               tmdbId={movie.tmdbId}
               title={movie.title}
-              posterPath={movie.posterPath}
+              posterPath={movie.posterPath ?? null}
               releaseYear={movie.releaseYear}
               isFavorite={true}
               onToggleFavorite={() => handleRemove(movie.tmdbId, movie.title)}

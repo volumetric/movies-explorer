@@ -189,7 +189,7 @@ export default function WatchlistPage() {
               <MovieCard
                 tmdbId={movie.tmdbId}
                 title={movie.title}
-                posterPath={movie.posterPath}
+                posterPath={movie.posterPath ?? null}
                 releaseYear={movie.releaseYear}
                 isInWatchlist={true}
                 onToggleFavorite={() => handleToggleFavorite(movie)}

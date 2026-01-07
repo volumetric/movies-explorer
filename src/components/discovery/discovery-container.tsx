@@ -101,7 +101,7 @@ export function DiscoveryContainer({
   // Fetch studio data only when switching to studio mode
   useEffect(() => {
     if (mode === "studio" && !studioData && !isLoadingStudio) {
-      async function fetchStudio() {
+      const fetchStudio = async () => {
         setIsLoadingStudio(true);
         try {
           const data = await discoverByStudio({
@@ -120,7 +120,7 @@ export function DiscoveryContainer({
         } finally {
           setIsLoadingStudio(false);
         }
-      }
+      };
       fetchStudio();
     }
   }, [mode, studioData, isLoadingStudio, selectedMovie.tmdbId, discoverByStudio, toast, selectedMovie.title, convexUser?._id]);
