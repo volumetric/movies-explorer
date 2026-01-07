@@ -234,7 +234,10 @@ Create Convex actions (not queries/mutations) since they need external HTTP call
 - getMovieDetails(tmdbId: number) // Get full movie details + credits
 - getDirectorFilmography(personId: number) // Get director's movies
 - getStudioFilmography(companyId: number) // Get studio's movies
-- discoverSimilarMovies(tmdbId: number, yearRange: number) // Main discovery logic
+
+// SEPARATE discovery functions (do not mix director and studio):
+- discoverByDirector(tmdbId: number, yearRange: number) // Director-based discovery
+- discoverByStudio(tmdbId: number, yearRange: number)   // Studio-based discovery
 ```
 
 ### 3.3 Caching Strategy
@@ -244,24 +247,113 @@ Create Convex actions (not queries/mutations) since they need external HTTP call
 - [ ] Implement cache invalidation on access
 - [ ] Use Convex scheduled functions for cache cleanup
 
-### 3.4 Discovery Algorithm
+### 3.4 Discovery Algorithm (Separate Paths)
+
+**IMPORTANT**: Director and Studio recommendations are kept completely separate. Users choose which view they want to see via a toggle in the UI.
+
+#### 3.4.1 Director-Based Discovery (`discoverByDirector`)
 
 ```typescript
-// Core discovery flow:
+// Flow for "By the same Director" recommendations:
 1. User enters favorite movie
 2. Fetch movie details from TMDB (or cache)
-3. Extract director ID and production company IDs
-4. Fetch director's filmography
-5. Fetch studio's filmography
-6. Filter movies by time proximity (±5 years from original)
-7. Score and rank by:
-   - Same director: +50 points
-   - Same studio: +30 points
-   - Year proximity: +20 points (decreasing by distance)
-   - Rating similarity: +10 points
-   - Genre overlap: +15 points per matching genre
-8. Return top recommendations with explanation
+3. Extract director ID from credits
+4. Fetch director's complete filmography
+5. Filter to only movies where this person was DIRECTOR
+6. Exclude the seed movie from results
+7. Return ALL movies (no year filtering) - score and rank by:
+   - Year proximity: +30 points max (rewards movies closer to seed movie's release)
+     • Same year: +30 points
+     • ±1 year: +27 points
+     • ±2 years: +24 points
+     • ±3 years: +21 points
+     • ±4 years: +18 points
+     • ±5 years: +15 points
+     • ±6-10 years: +10 points
+     • ±11-15 years: +5 points
+     • >15 years: +2 points (still included, just lower priority)
+   - Rating quality: +25 points max (based on TMDB vote_average)
+     • 8.0+: +25 points
+     • 7.0-7.9: +20 points
+     • 6.0-6.9: +15 points
+     • 5.0-5.9: +10 points
+     • <5.0: +5 points
+   - Genre overlap: +10 points per matching genre (max +30 points)
+   - Popularity boost: +15 points if vote_count > 1000
+8. Return ranked list with director info and explanation
+   (All movies included - year proximity affects ranking, not filtering)
 ```
+
+#### 3.4.2 Studio-Based Discovery (`discoverByStudio`)
+
+```typescript
+// Flow for "By the same Studio" recommendations:
+1. User enters favorite movie
+2. Fetch movie details from TMDB (or cache)
+3. Extract primary production company (studio) ID
+4. Fetch studio's complete filmography
+5. Filter movies produced by this studio
+6. Exclude the seed movie from results
+7. Return ALL movies (no year filtering) - score and rank by:
+   - Year proximity: +30 points max (rewards movies closer to seed movie's release)
+     • Same year: +30 points
+     • ±1 year: +27 points
+     • ±2 years: +24 points
+     • ±3 years: +21 points
+     • ±4 years: +18 points
+     • ±5 years: +15 points
+     • ±6-10 years: +10 points
+     • ±11-15 years: +5 points
+     • >15 years: +2 points (still included, just lower priority)
+   - Rating quality: +25 points max (based on TMDB vote_average)
+     • 8.0+: +25 points
+     • 7.0-7.9: +20 points
+     • 6.0-6.9: +15 points
+     • 5.0-5.9: +10 points
+     • <5.0: +5 points
+   - Genre overlap: +10 points per matching genre (max +30 points)
+   - Popularity boost: +15 points if vote_count > 1000
+8. Return ranked list with studio info and explanation
+   (All movies included - year proximity affects ranking, not filtering)
+```
+
+#### 3.4.3 Response Format
+
+```typescript
+// Director recommendations response
+interface DirectorRecommendations {
+  seedMovie: MovieDetails;
+  director: {
+    id: number;
+    name: string;
+    profilePath: string | null;
+    totalFilms: number;
+  };
+  recommendations: ScoredMovie[];
+}
+
+// Studio recommendations response
+interface StudioRecommendations {
+  seedMovie: MovieDetails;
+  studio: {
+    id: number;
+    name: string;
+    logoPath: string | null;
+    totalFilms: number;
+  };
+  recommendations: ScoredMovie[];
+}
+
+interface ScoredMovie {
+  movie: MovieDetails;
+  score: number;
+  scoreBreakdown: {
+    yearProximity: number;
+    ratingQuality: number;
+    genreOverlap: number;
+    popularityBoost: number;
+  };
+}
 
 ---
 
@@ -310,15 +402,19 @@ src/components/
 │   ├── MovieGrid.tsx       # Grid of movie cards
 │   ├── MovieSearch.tsx     # Search input with autocomplete
 │   ├── MovieDetail.tsx     # Full movie info
-│   └── MovieRecommendations.tsx
+│   └── SeedMovieCard.tsx   # Highlighted card for selected movie
 ├── discovery/
-│   ├── DiscoveryFlow.tsx   # Main discovery wizard
-│   ├── DirectorSection.tsx # Director's movies
-│   ├── StudioSection.tsx   # Studio's movies
-│   └── TimelineView.tsx    # Visual timeline of movies
+│   ├── DiscoveryContainer.tsx    # Main container managing toggle state
+│   ├── DiscoveryToggle.tsx       # Toggle: "By Director" | "By Studio"
+│   ├── DirectorRecommendations.tsx  # Director-based results view
+│   ├── StudioRecommendations.tsx    # Studio-based results view
+│   ├── RecommendationCard.tsx       # Movie card with score breakdown
+│   └── TimelineView.tsx             # Visual timeline of movies
 ├── person/
-│   ├── DirectorCard.tsx
+│   ├── DirectorCard.tsx          # Director info header
 │   └── DirectorFilmography.tsx
+├── studio/
+│   └── StudioCard.tsx            # Studio info header with logo
 └── common/
     ├── LoadingSpinner.tsx
     ├── ErrorBoundary.tsx
@@ -332,16 +428,36 @@ src/components/
 - Display movie poster, year, director preview
 - One-click add to favorites
 
-#### Feature 2: Discovery Engine
-- Input: User's favorite movie
-- Output: Related movies from same director/studio
-- Visual timeline showing when movies were made
-- Filtering by year range, genre, rating
+#### Feature 2: Discovery Engine (Separate Director/Studio Views)
+
+**Toggle-Based Interface:**
+- User selects a movie to explore
+- Default view: **"By the same Director"** (selected by default)
+- Alternative view: **"By the same Studio"**
+- User can switch between views with a single click
+- Each view shows completely independent recommendations
+
+**"By the same Director" View:**
+- Shows director's photo/name prominently
+- Lists ALL movies directed by this person
+- Ranked by scoring algorithm (year proximity, rating, genre, popularity)
+- Movies from same era appear first, but older/newer films still visible
+
+**"By the same Studio" View:**
+- Shows studio logo/name prominently
+- Lists ALL movies produced by this studio
+- Ranked by same scoring algorithm
+- Separate data set from director view
+
+**UI Behavior:**
+- Toggle persists during session (remembers user's preference)
+- Both views available for same seed movie without re-searching
+- Clear visual indication of which view is active
 
 #### Feature 3: Favorites Management
 - Add/remove favorite movies
 - View all favorites in grid
-- Quick discovery from any favorite
+- Quick discovery from any favorite (opens discovery with toggle)
 
 #### Feature 4: Watchlist
 - Add recommended movies to watchlist
@@ -390,6 +506,78 @@ src/components/
 └─────────────────┘
 ```
 
+**Discovery Page Layout with Toggle:**
+```
+┌────────────────────────────────────────────────────────────────┐
+│  ← Back                                    [+ Add to Watchlist]│
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  ┌──────────┐  The Dark Knight (2008)                         │
+│  │          │  Directed by Christopher Nolan                   │
+│  │ [Poster] │  Warner Bros. Pictures                          │
+│  │          │  ★ 9.0  ·  Action, Crime, Drama                 │
+│  └──────────┘                                                  │
+│                                                                │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  Discover Similar Movies                                       │
+│                                                                │
+│  ┌─────────────────────────────┬─────────────────────────────┐ │
+│  │    ◉ By the same Director   │   ○ By the same Studio      │ │
+│  └─────────────────────────────┴─────────────────────────────┘ │
+│                                                                │
+│  ┌──────────────────────────────────────────────────────────┐ │
+│  │  👤 Christopher Nolan                                     │ │
+│  │  12 films as director · Active 1998-present              │ │
+│  └──────────────────────────────────────────────────────────┘ │
+│                                                                │
+│  Recommended Films (sorted by relevance)                       │
+│                                                                │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ │
+│  │Inception│ │Prestige │ │ Batman  │ │Dunkirk  │ │Memento  │ │
+│  │  2010   │ │  2006   │ │ Begins  │ │  2017   │ │  2000   │ │
+│  │ ★ 8.8  │ │ ★ 8.5  │ │  2005   │ │ ★ 7.8  │ │ ★ 8.4  │ │
+│  │ 87 pts │ │ 82 pts │ │ ★ 8.2  │ │ 71 pts │ │ 68 pts │ │
+│  └─────────┘ └─────────┘ │ 79 pts │ └─────────┘ └─────────┘ │
+│                          └─────────┘                          │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**Toggle Component (ShadCN Tabs style):**
+```
+Default State (Director selected):
+┌────────────────────────────────────────────────────────────────┐
+│  ┌─────────────────────────────┬─────────────────────────────┐ │
+│  │ ████ By the same Director ██│    By the same Studio       │ │
+│  └─────────────────────────────┴─────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────┘
+
+After clicking Studio:
+┌────────────────────────────────────────────────────────────────┐
+│  ┌─────────────────────────────┬─────────────────────────────┐ │
+│  │    By the same Director     │ ████ By the same Studio ████│ │
+│  └─────────────────────────────┴─────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────┘
+
+- Active tab has filled background (primary color)
+- Inactive tab has transparent/muted background
+- Smooth transition animation between tabs
+- Content below updates immediately on toggle
+```
+
+**Studio View (when toggled):**
+```
+│  ┌──────────────────────────────────────────────────────────┐ │
+│  │  🏢 Warner Bros. Pictures                                 │ │
+│  │  Est. 1923 · Headquarters: Burbank, CA                   │ │
+│  │  2,500+ films produced                                   │ │
+│  └──────────────────────────────────────────────────────────┘ │
+│                                                                │
+│  Recommended Films (sorted by relevance)                       │
+│                                                                │
+│  [Different set of movies produced by Warner Bros.]            │
+```
+
 **Discovery Timeline View:**
 ```
      1990        1995        2000        2005        2010
@@ -398,8 +586,8 @@ src/components/
    Movie A    [Selected]   Movie C     Movie D     Movie E
               Movie B
 
-● = Selected movie
-○ = Related movies from same director/studio
+● = Selected movie (seed)
+○ = Related movies from same director OR studio (depending on toggle)
 ```
 
 ### 5.3 Responsive Design
@@ -416,7 +604,7 @@ src/components/
 
 **Tasks:**
 - [ ] Configure Clerk application
-- [ ] Enable Google + GitHub OAuth
+- [ ] Enable Google OAuth only (no GitHub)
 - [ ] Customize sign-in/sign-up UI to match theme
 - [ ] Set up webhook for user sync to Convex
 
