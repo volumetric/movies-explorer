@@ -2,7 +2,7 @@
 
 import { v } from "convex/values";
 import { action, internalAction } from "./_generated/server";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
@@ -115,8 +115,36 @@ export const searchMovies = action({
 
 export const getMovieDetails = action({
   args: { tmdbId: v.number() },
-  handler: async (ctx, args) => {
-    // Fetch movie details
+  handler: async (ctx, args): Promise<MovieDetails> => {
+    // Check cache first
+    const cached = await ctx.runQuery(internal.cache.getMovieFromCache, {
+      tmdbId: args.tmdbId,
+    });
+
+    if (cached) {
+      return {
+        tmdbId: cached.tmdbId,
+        title: cached.title,
+        originalTitle: cached.originalTitle || cached.title,
+        overview: cached.overview || "",
+        posterPath: cached.posterPath ?? null,
+        backdropPath: cached.backdropPath ?? null,
+        releaseDate: cached.releaseDate,
+        releaseYear: cached.releaseYear,
+        runtime: cached.runtime || 0,
+        voteAverage: cached.voteAverage || 0,
+        voteCount: cached.voteCount || 0,
+        genres: cached.genres,
+        directorId: cached.directorId,
+        directorName: cached.directorName,
+        productionCompanies: cached.productionCompanies.map((c) => ({
+          ...c,
+          logoPath: c.logoPath ?? null,
+        })),
+      };
+    }
+
+    // Fetch movie details from API
     const movie = await tmdbFetch(`/movie/${args.tmdbId}`);
 
     // Fetch credits to get director
@@ -126,7 +154,7 @@ export const getMovieDetails = action({
       (person: any) => person.job === "Director"
     );
 
-    return {
+    const movieData = {
       tmdbId: movie.id,
       title: movie.title,
       originalTitle: movie.original_title,
@@ -147,16 +175,43 @@ export const getMovieDetails = action({
         movie.production_companies?.map((c: any) => ({
           id: c.id,
           name: c.name,
-          logoPath: c.logo_path,
+          logoPath: c.logo_path || undefined,
         })) || [],
     };
+
+    // Save to cache
+    await ctx.runMutation(internal.cache.saveMovieToCache, movieData);
+
+    return movieData;
   },
 });
 
 export const getDirectorDetails = action({
   args: { personId: v.number() },
-  handler: async (ctx, args) => {
-    // Fetch person details
+  handler: async (ctx, args): Promise<DirectorDetails> => {
+    // Check cache first
+    const cached = await ctx.runQuery(internal.cache.getDirectorFromCache, {
+      personId: args.personId,
+    });
+
+    if (cached) {
+      return {
+        id: cached.tmdbPersonId,
+        name: cached.name,
+        profilePath: cached.profilePath ?? null,
+        biography: cached.biography || "",
+        birthday: cached.birthday ?? null,
+        placeOfBirth: cached.placeOfBirth ?? null,
+        filmography: cached.filmography.map((m) => ({
+          ...m,
+          posterPath: m.posterPath ?? null,
+          voteAverage: m.voteAverage ?? 0,
+          voteCount: m.voteCount ?? 0,
+        })),
+      };
+    }
+
+    // Fetch person details from API
     const person = await tmdbFetch(`/person/${args.personId}`);
 
     // Fetch movie credits
@@ -167,6 +222,29 @@ export const getDirectorDetails = action({
       (credit: any) => credit.job === "Director"
     ) || [];
 
+    const filmography = directorCredits.map((movie: any) => ({
+      tmdbId: movie.id,
+      title: movie.title,
+      releaseYear: movie.release_date
+        ? new Date(movie.release_date).getFullYear()
+        : 0,
+      posterPath: movie.poster_path || undefined,
+      voteAverage: movie.vote_average,
+      voteCount: movie.vote_count,
+      job: movie.job,
+    }));
+
+    // Save to cache
+    await ctx.runMutation(internal.cache.saveDirectorToCache, {
+      tmdbPersonId: person.id,
+      name: person.name,
+      profilePath: person.profile_path || undefined,
+      biography: person.biography || undefined,
+      birthday: person.birthday || undefined,
+      placeOfBirth: person.place_of_birth || undefined,
+      filmography,
+    });
+
     return {
       id: person.id,
       name: person.name,
@@ -174,25 +252,37 @@ export const getDirectorDetails = action({
       biography: person.biography,
       birthday: person.birthday,
       placeOfBirth: person.place_of_birth,
-      filmography: directorCredits.map((movie: any) => ({
-        tmdbId: movie.id,
-        title: movie.title,
-        releaseYear: movie.release_date
-          ? new Date(movie.release_date).getFullYear()
-          : 0,
-        posterPath: movie.poster_path,
-        voteAverage: movie.vote_average,
-        voteCount: movie.vote_count,
-        job: movie.job,
-      })),
+      filmography,
     };
   },
 });
 
 export const getStudioDetails = action({
   args: { companyId: v.number() },
-  handler: async (ctx, args) => {
-    // Fetch company details
+  handler: async (ctx, args): Promise<StudioDetails> => {
+    // Check cache first
+    const cached = await ctx.runQuery(internal.cache.getStudioFromCache, {
+      companyId: args.companyId,
+    });
+
+    if (cached) {
+      return {
+        id: cached.tmdbCompanyId,
+        name: cached.name,
+        logoPath: cached.logoPath ?? null,
+        description: cached.description || "",
+        headquarters: cached.headquarters || "",
+        homepage: cached.homepage || "",
+        filmography: cached.filmography.map((m) => ({
+          ...m,
+          posterPath: m.posterPath ?? null,
+          voteAverage: m.voteAverage ?? 0,
+          voteCount: m.voteCount ?? 0,
+        })),
+      };
+    }
+
+    // Fetch company details from API
     const company = await tmdbFetch(`/company/${args.companyId}`);
 
     // Fetch movies by company (paginated, get multiple pages)
@@ -213,6 +303,28 @@ export const getStudioDetails = action({
       page++;
     }
 
+    const filmography = allMovies.map((movie: any) => ({
+      tmdbId: movie.id,
+      title: movie.title,
+      releaseYear: movie.release_date
+        ? new Date(movie.release_date).getFullYear()
+        : 0,
+      posterPath: movie.poster_path || undefined,
+      voteAverage: movie.vote_average,
+      voteCount: movie.vote_count,
+    }));
+
+    // Save to cache
+    await ctx.runMutation(internal.cache.saveStudioToCache, {
+      tmdbCompanyId: company.id,
+      name: company.name,
+      logoPath: company.logo_path || undefined,
+      description: company.description || undefined,
+      headquarters: company.headquarters || undefined,
+      homepage: company.homepage || undefined,
+      filmography,
+    });
+
     return {
       id: company.id,
       name: company.name,
@@ -220,16 +332,7 @@ export const getStudioDetails = action({
       description: company.description,
       headquarters: company.headquarters,
       homepage: company.homepage,
-      filmography: allMovies.map((movie: any) => ({
-        tmdbId: movie.id,
-        title: movie.title,
-        releaseYear: movie.release_date
-          ? new Date(movie.release_date).getFullYear()
-          : 0,
-        posterPath: movie.poster_path,
-        voteAverage: movie.vote_average,
-        voteCount: movie.vote_count,
-      })),
+      filmography,
     };
   },
 });
@@ -269,7 +372,7 @@ function calculatePopularityScore(voteCount: number): number {
 }
 
 export const discoverByDirector = action({
-  args: { tmdbId: v.number() },
+  args: { tmdbId: v.number(), userId: v.optional(v.id("users")) },
   handler: async (ctx, args) => {
     // Get movie details
     const movieDetails: MovieDetails = await ctx.runAction(api.tmdb.getMovieDetails, {
@@ -320,6 +423,20 @@ export const discoverByDirector = action({
       })
       .sort((a: any, b: any) => b.score - a.score);
 
+    // Save discovery session if userId is provided
+    if (args.userId) {
+      await ctx.runMutation(internal.cache.saveDiscoverySession, {
+        userId: args.userId,
+        seedMovieTmdbId: movieDetails.tmdbId,
+        seedMovieTitle: movieDetails.title,
+        seedMoviePosterPath: movieDetails.posterPath || undefined,
+        mode: "director",
+        directorId: director.id,
+        directorName: director.name,
+        recommendedMovieIds: recommendations.map((r: any) => r.movie.tmdbId),
+      });
+    }
+
     return {
       seedMovie: movieDetails,
       director: {
@@ -337,7 +454,7 @@ export const discoverByDirector = action({
 });
 
 export const discoverByStudio = action({
-  args: { tmdbId: v.number() },
+  args: { tmdbId: v.number(), userId: v.optional(v.id("users")) },
   handler: async (ctx, args) => {
     // Get movie details
     const movieDetails: MovieDetails = await ctx.runAction(api.tmdb.getMovieDetails, {
@@ -389,6 +506,20 @@ export const discoverByStudio = action({
         };
       })
       .sort((a: any, b: any) => b.score - a.score);
+
+    // Save discovery session if userId is provided
+    if (args.userId) {
+      await ctx.runMutation(internal.cache.saveDiscoverySession, {
+        userId: args.userId,
+        seedMovieTmdbId: movieDetails.tmdbId,
+        seedMovieTitle: movieDetails.title,
+        seedMoviePosterPath: movieDetails.posterPath || undefined,
+        mode: "studio",
+        studioId: studio.id,
+        studioName: studio.name,
+        recommendedMovieIds: recommendations.map((r: any) => r.movie.tmdbId),
+      });
+    }
 
     return {
       seedMovie: movieDetails,

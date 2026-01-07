@@ -55,6 +55,20 @@ export function DiscoveryContainer({
     user?.id ? { clerkId: user.id } : "skip"
   );
 
+  // Query favorites and watchlist
+  const favorites = useQuery(
+    api.favorites.getFavorites,
+    convexUser?._id ? { userId: convexUser._id } : "skip"
+  );
+  const watchlist = useQuery(
+    api.watchlist.getWatchlist,
+    convexUser?._id ? { userId: convexUser._id } : "skip"
+  );
+
+  // Create sets for quick lookup
+  const favoriteIds = new Set(favorites?.map((f) => f.tmdbId) || []);
+  const watchlistIds = new Set(watchlist?.map((w) => w.tmdbId) || []);
+
   // Mutations
   const toggleFavorite = useMutation(api.favorites.toggleFavorite);
   const toggleWatchlist = useMutation(api.watchlist.toggleWatchlist);
@@ -64,7 +78,10 @@ export function DiscoveryContainer({
     async function fetchDirector() {
       setIsLoadingDirector(true);
       try {
-        const data = await discoverByDirector({ tmdbId: selectedMovie.tmdbId });
+        const data = await discoverByDirector({
+          tmdbId: selectedMovie.tmdbId,
+          userId: convexUser?._id,
+        });
         setDirectorData(data);
         trackEvent.discoveryStarted(selectedMovie.tmdbId, selectedMovie.title, "director");
       } catch (error) {
@@ -79,7 +96,7 @@ export function DiscoveryContainer({
       }
     }
     fetchDirector();
-  }, [selectedMovie.tmdbId, discoverByDirector, toast, selectedMovie.title]);
+  }, [selectedMovie.tmdbId, discoverByDirector, toast, selectedMovie.title, convexUser?._id]);
 
   // Fetch studio data only when switching to studio mode
   useEffect(() => {
@@ -87,7 +104,10 @@ export function DiscoveryContainer({
       async function fetchStudio() {
         setIsLoadingStudio(true);
         try {
-          const data = await discoverByStudio({ tmdbId: selectedMovie.tmdbId });
+          const data = await discoverByStudio({
+            tmdbId: selectedMovie.tmdbId,
+            userId: convexUser?._id,
+          });
           setStudioData(data);
           trackEvent.discoveryStarted(selectedMovie.tmdbId, selectedMovie.title, "studio");
         } catch (error) {
@@ -103,7 +123,7 @@ export function DiscoveryContainer({
       }
       fetchStudio();
     }
-  }, [mode, studioData, isLoadingStudio, selectedMovie.tmdbId, discoverByStudio, toast, selectedMovie.title]);
+  }, [mode, studioData, isLoadingStudio, selectedMovie.tmdbId, discoverByStudio, toast, selectedMovie.title, convexUser?._id]);
 
   const handleModeChange = (newMode: DiscoveryMode) => {
     setMode(newMode);
@@ -264,6 +284,8 @@ export function DiscoveryContainer({
                     score={rec.score}
                     scoreBreakdown={rec.scoreBreakdown}
                     showScore={true}
+                    isFavorite={favoriteIds.has(rec.movie.tmdbId)}
+                    isInWatchlist={watchlistIds.has(rec.movie.tmdbId)}
                     onToggleFavorite={() => handleToggleFavorite(rec.movie)}
                     onToggleWatchlist={() => handleToggleWatchlist(rec.movie)}
                   />

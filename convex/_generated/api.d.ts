@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as cache from "../cache.js";
 import type * as discovery from "../discovery.js";
 import type * as favorites from "../favorites.js";
 import type * as tmdb from "../tmdb.js";
@@ -21,6 +22,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  cache: typeof cache;
   discovery: typeof discovery;
   favorites: typeof favorites;
   tmdb: typeof tmdb;
