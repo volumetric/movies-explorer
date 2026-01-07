@@ -354,6 +354,7 @@ interface ScoredMovie {
     popularityBoost: number;
   };
 }
+```
 
 ---
 
