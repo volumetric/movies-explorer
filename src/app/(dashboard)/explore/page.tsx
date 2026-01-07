@@ -138,7 +138,7 @@ export default function ExplorePage() {
         userId: convexUser._id,
         tmdbId: movie.tmdbId,
         title: movie.title,
-        posterPath: movie.posterPath,
+        posterPath: movie.posterPath ?? undefined,
         releaseYear: movie.releaseYear,
       });
       if (result.added) {
@@ -159,7 +159,7 @@ export default function ExplorePage() {
         userId: convexUser._id,
         tmdbId: movie.tmdbId,
         title: movie.title,
-        posterPath: movie.posterPath,
+        posterPath: movie.posterPath ?? undefined,
         releaseYear: movie.releaseYear,
       });
       if (result.added) {
