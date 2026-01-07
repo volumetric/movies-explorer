@@ -1,0 +1,352 @@
+"use node";
+
+import { v } from "convex/values";
+import { action, internalAction } from "./_generated/server";
+import { internal } from "./_generated/api";
+
+const TMDB_BASE_URL = "https://api.themoviedb.org/3";
+const CACHE_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+async function tmdbFetch(endpoint: string, params: Record<string, string> = {}) {
+  const apiKey = process.env.TMDB_API_KEY;
+  if (!apiKey) {
+    throw new Error("TMDB_API_KEY not configured");
+  }
+
+  const url = new URL(`${TMDB_BASE_URL}${endpoint}`);
+  url.searchParams.set("api_key", apiKey);
+  Object.entries(params).forEach(([key, value]) => {
+    url.searchParams.set(key, value);
+  });
+
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(`TMDB API error: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export const searchMovies = action({
+  args: { query: v.string(), page: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const data = await tmdbFetch("/search/movie", {
+      query: args.query,
+      page: String(args.page ?? 1),
+      include_adult: "false",
+    });
+
+    return {
+      page: data.page,
+      totalPages: data.total_pages,
+      totalResults: data.total_results,
+      results: data.results.map((movie: any) => ({
+        tmdbId: movie.id,
+        title: movie.title,
+        originalTitle: movie.original_title,
+        overview: movie.overview,
+        posterPath: movie.poster_path,
+        backdropPath: movie.backdrop_path,
+        releaseDate: movie.release_date || "",
+        releaseYear: movie.release_date
+          ? new Date(movie.release_date).getFullYear()
+          : 0,
+        voteAverage: movie.vote_average,
+        voteCount: movie.vote_count,
+        genreIds: movie.genre_ids,
+      })),
+    };
+  },
+});
+
+export const getMovieDetails = action({
+  args: { tmdbId: v.number() },
+  handler: async (ctx, args) => {
+    // Fetch movie details
+    const movie = await tmdbFetch(`/movie/${args.tmdbId}`);
+
+    // Fetch credits to get director
+    const credits = await tmdbFetch(`/movie/${args.tmdbId}/credits`);
+
+    const director = credits.crew?.find(
+      (person: any) => person.job === "Director"
+    );
+
+    return {
+      tmdbId: movie.id,
+      title: movie.title,
+      originalTitle: movie.original_title,
+      overview: movie.overview,
+      posterPath: movie.poster_path,
+      backdropPath: movie.backdrop_path,
+      releaseDate: movie.release_date || "",
+      releaseYear: movie.release_date
+        ? new Date(movie.release_date).getFullYear()
+        : 0,
+      runtime: movie.runtime,
+      voteAverage: movie.vote_average,
+      voteCount: movie.vote_count,
+      genres: movie.genres?.map((g: any) => ({ id: g.id, name: g.name })) || [],
+      directorId: director?.id,
+      directorName: director?.name,
+      productionCompanies:
+        movie.production_companies?.map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          logoPath: c.logo_path,
+        })) || [],
+    };
+  },
+});
+
+export const getDirectorDetails = action({
+  args: { personId: v.number() },
+  handler: async (ctx, args) => {
+    // Fetch person details
+    const person = await tmdbFetch(`/person/${args.personId}`);
+
+    // Fetch movie credits
+    const credits = await tmdbFetch(`/person/${args.personId}/movie_credits`);
+
+    // Filter to only director credits
+    const directorCredits = credits.crew?.filter(
+      (credit: any) => credit.job === "Director"
+    ) || [];
+
+    return {
+      id: person.id,
+      name: person.name,
+      profilePath: person.profile_path,
+      biography: person.biography,
+      birthday: person.birthday,
+      placeOfBirth: person.place_of_birth,
+      filmography: directorCredits.map((movie: any) => ({
+        tmdbId: movie.id,
+        title: movie.title,
+        releaseYear: movie.release_date
+          ? new Date(movie.release_date).getFullYear()
+          : 0,
+        posterPath: movie.poster_path,
+        voteAverage: movie.vote_average,
+        voteCount: movie.vote_count,
+        job: movie.job,
+      })),
+    };
+  },
+});
+
+export const getStudioDetails = action({
+  args: { companyId: v.number() },
+  handler: async (ctx, args) => {
+    // Fetch company details
+    const company = await tmdbFetch(`/company/${args.companyId}`);
+
+    // Fetch movies by company (paginated, get multiple pages)
+    const allMovies: any[] = [];
+    let page = 1;
+    const maxPages = 5; // Limit to avoid too many API calls
+
+    while (page <= maxPages) {
+      const movies = await tmdbFetch("/discover/movie", {
+        with_companies: String(args.companyId),
+        sort_by: "vote_count.desc",
+        page: String(page),
+      });
+
+      allMovies.push(...movies.results);
+
+      if (page >= movies.total_pages) break;
+      page++;
+    }
+
+    return {
+      id: company.id,
+      name: company.name,
+      logoPath: company.logo_path,
+      description: company.description,
+      headquarters: company.headquarters,
+      homepage: company.homepage,
+      filmography: allMovies.map((movie: any) => ({
+        tmdbId: movie.id,
+        title: movie.title,
+        releaseYear: movie.release_date
+          ? new Date(movie.release_date).getFullYear()
+          : 0,
+        posterPath: movie.poster_path,
+        voteAverage: movie.vote_average,
+        voteCount: movie.vote_count,
+      })),
+    };
+  },
+});
+
+// Scoring functions
+function calculateYearProximityScore(seedYear: number, movieYear: number): number {
+  const diff = Math.abs(seedYear - movieYear);
+  if (diff === 0) return 30;
+  if (diff === 1) return 27;
+  if (diff === 2) return 24;
+  if (diff === 3) return 21;
+  if (diff === 4) return 18;
+  if (diff === 5) return 15;
+  if (diff <= 10) return 10;
+  if (diff <= 15) return 5;
+  return 2;
+}
+
+function calculateRatingScore(voteAverage: number): number {
+  if (voteAverage >= 8.0) return 25;
+  if (voteAverage >= 7.0) return 20;
+  if (voteAverage >= 6.0) return 15;
+  if (voteAverage >= 5.0) return 10;
+  return 5;
+}
+
+function calculateGenreOverlapScore(
+  seedGenreIds: number[],
+  movieGenreIds: number[]
+): number {
+  const overlap = seedGenreIds.filter((g) => movieGenreIds.includes(g)).length;
+  return Math.min(overlap * 10, 30);
+}
+
+function calculatePopularityScore(voteCount: number): number {
+  return voteCount > 1000 ? 15 : 0;
+}
+
+export const discoverByDirector = action({
+  args: { tmdbId: v.number() },
+  handler: async (ctx, args) => {
+    // Get movie details
+    const movieDetails = await ctx.runAction(internal.tmdb.getMovieDetails, {
+      tmdbId: args.tmdbId,
+    });
+
+    if (!movieDetails.directorId) {
+      throw new Error("No director found for this movie");
+    }
+
+    // Get director details with filmography
+    const director = await ctx.runAction(internal.tmdb.getDirectorDetails, {
+      personId: movieDetails.directorId,
+    });
+
+    // Filter out the seed movie and score remaining
+    const recommendations = director.filmography
+      .filter((movie: any) => movie.tmdbId !== args.tmdbId && movie.releaseYear > 0)
+      .map((movie: any) => {
+        const yearProximity = calculateYearProximityScore(
+          movieDetails.releaseYear,
+          movie.releaseYear
+        );
+        const ratingQuality = calculateRatingScore(movie.voteAverage || 0);
+        const popularityBoost = calculatePopularityScore(movie.voteCount || 0);
+        // Note: We don't have genre info for filmography movies, so genre overlap is 0
+        const genreOverlap = 0;
+
+        const score = yearProximity + ratingQuality + genreOverlap + popularityBoost;
+
+        return {
+          movie: {
+            tmdbId: movie.tmdbId,
+            title: movie.title,
+            posterPath: movie.posterPath,
+            releaseYear: movie.releaseYear,
+            voteAverage: movie.voteAverage,
+            voteCount: movie.voteCount,
+          },
+          score,
+          scoreBreakdown: {
+            yearProximity,
+            ratingQuality,
+            genreOverlap,
+            popularityBoost,
+          },
+        };
+      })
+      .sort((a: any, b: any) => b.score - a.score);
+
+    return {
+      seedMovie: movieDetails,
+      director: {
+        id: director.id,
+        name: director.name,
+        profilePath: director.profilePath,
+        biography: director.biography,
+        birthday: director.birthday,
+        placeOfBirth: director.placeOfBirth,
+        totalFilms: director.filmography.length,
+      },
+      recommendations,
+    };
+  },
+});
+
+export const discoverByStudio = action({
+  args: { tmdbId: v.number() },
+  handler: async (ctx, args) => {
+    // Get movie details
+    const movieDetails = await ctx.runAction(internal.tmdb.getMovieDetails, {
+      tmdbId: args.tmdbId,
+    });
+
+    if (!movieDetails.productionCompanies?.length) {
+      throw new Error("No production company found for this movie");
+    }
+
+    // Use the first (primary) production company
+    const primaryCompany = movieDetails.productionCompanies[0];
+
+    // Get studio details with filmography
+    const studio = await ctx.runAction(internal.tmdb.getStudioDetails, {
+      companyId: primaryCompany.id,
+    });
+
+    // Filter out the seed movie and score remaining
+    const recommendations = studio.filmography
+      .filter((movie: any) => movie.tmdbId !== args.tmdbId && movie.releaseYear > 0)
+      .map((movie: any) => {
+        const yearProximity = calculateYearProximityScore(
+          movieDetails.releaseYear,
+          movie.releaseYear
+        );
+        const ratingQuality = calculateRatingScore(movie.voteAverage || 0);
+        const popularityBoost = calculatePopularityScore(movie.voteCount || 0);
+        const genreOverlap = 0;
+
+        const score = yearProximity + ratingQuality + genreOverlap + popularityBoost;
+
+        return {
+          movie: {
+            tmdbId: movie.tmdbId,
+            title: movie.title,
+            posterPath: movie.posterPath,
+            releaseYear: movie.releaseYear,
+            voteAverage: movie.voteAverage,
+            voteCount: movie.voteCount,
+          },
+          score,
+          scoreBreakdown: {
+            yearProximity,
+            ratingQuality,
+            genreOverlap,
+            popularityBoost,
+          },
+        };
+      })
+      .sort((a: any, b: any) => b.score - a.score);
+
+    return {
+      seedMovie: movieDetails,
+      studio: {
+        id: studio.id,
+        name: studio.name,
+        logoPath: studio.logoPath,
+        description: studio.description,
+        headquarters: studio.headquarters,
+        totalFilms: studio.filmography.length,
+      },
+      recommendations,
+    };
+  },
+});
