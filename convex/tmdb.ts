@@ -2,9 +2,63 @@
 
 import { v } from "convex/values";
 import { action, internalAction } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { api } from "./_generated/api";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
+
+// Type definitions for internal action returns
+type MovieDetails = {
+  tmdbId: number;
+  title: string;
+  originalTitle: string;
+  overview: string;
+  posterPath: string | null;
+  backdropPath: string | null;
+  releaseDate: string;
+  releaseYear: number;
+  runtime: number;
+  voteAverage: number;
+  voteCount: number;
+  genres: { id: number; name: string }[];
+  directorId?: number;
+  directorName?: string;
+  productionCompanies: { id: number; name: string; logoPath: string | null }[];
+};
+
+type DirectorDetails = {
+  id: number;
+  name: string;
+  profilePath: string | null;
+  biography: string;
+  birthday: string | null;
+  placeOfBirth: string | null;
+  filmography: {
+    tmdbId: number;
+    title: string;
+    releaseYear: number;
+    posterPath: string | null;
+    voteAverage: number;
+    voteCount: number;
+    job: string;
+  }[];
+};
+
+type StudioDetails = {
+  id: number;
+  name: string;
+  logoPath: string | null;
+  description: string;
+  headquarters: string;
+  homepage: string;
+  filmography: {
+    tmdbId: number;
+    title: string;
+    releaseYear: number;
+    posterPath: string | null;
+    voteAverage: number;
+    voteCount: number;
+  }[];
+};
 const CACHE_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 async function tmdbFetch(endpoint: string, params: Record<string, string> = {}) {
@@ -218,7 +272,7 @@ export const discoverByDirector = action({
   args: { tmdbId: v.number() },
   handler: async (ctx, args) => {
     // Get movie details
-    const movieDetails = await ctx.runAction(internal.tmdb.getMovieDetails, {
+    const movieDetails: MovieDetails = await ctx.runAction(api.tmdb.getMovieDetails, {
       tmdbId: args.tmdbId,
     });
 
@@ -227,7 +281,7 @@ export const discoverByDirector = action({
     }
 
     // Get director details with filmography
-    const director = await ctx.runAction(internal.tmdb.getDirectorDetails, {
+    const director: DirectorDetails = await ctx.runAction(api.tmdb.getDirectorDetails, {
       personId: movieDetails.directorId,
     });
 
@@ -286,7 +340,7 @@ export const discoverByStudio = action({
   args: { tmdbId: v.number() },
   handler: async (ctx, args) => {
     // Get movie details
-    const movieDetails = await ctx.runAction(internal.tmdb.getMovieDetails, {
+    const movieDetails: MovieDetails = await ctx.runAction(api.tmdb.getMovieDetails, {
       tmdbId: args.tmdbId,
     });
 
@@ -298,7 +352,7 @@ export const discoverByStudio = action({
     const primaryCompany = movieDetails.productionCompanies[0];
 
     // Get studio details with filmography
-    const studio = await ctx.runAction(internal.tmdb.getStudioDetails, {
+    const studio: StudioDetails = await ctx.runAction(api.tmdb.getStudioDetails, {
       companyId: primaryCompany.id,
     });
 
