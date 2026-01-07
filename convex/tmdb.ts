@@ -81,6 +81,66 @@ async function tmdbFetch(endpoint: string, params: Record<string, string> = {}) 
   return response.json();
 }
 
+export const getPopularMovies = action({
+  args: { page: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const data = await tmdbFetch("/movie/popular", {
+      page: String(args.page ?? 1),
+    });
+
+    return {
+      page: data.page,
+      totalPages: data.total_pages,
+      totalResults: data.total_results,
+      results: data.results.map((movie: any) => ({
+        tmdbId: movie.id,
+        title: movie.title,
+        originalTitle: movie.original_title,
+        overview: movie.overview,
+        posterPath: movie.poster_path,
+        backdropPath: movie.backdrop_path,
+        releaseDate: movie.release_date || "",
+        releaseYear: movie.release_date
+          ? new Date(movie.release_date).getFullYear()
+          : 0,
+        voteAverage: movie.vote_average,
+        voteCount: movie.vote_count,
+        genreIds: movie.genre_ids,
+      })),
+    };
+  },
+});
+
+export const getTopRatedMovies = action({
+  args: { page: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const data = await tmdbFetch("/movie/top_rated", {
+      page: String(args.page ?? 1),
+    });
+
+    return {
+      page: data.page,
+      totalPages: data.total_pages,
+      totalResults: data.total_results,
+      results: data.results.map((movie: any) => ({
+        tmdbId: movie.id,
+        title: movie.title,
+        originalTitle: movie.original_title,
+        overview: movie.overview,
+        posterPath: movie.poster_path,
+        backdropPath: movie.backdrop_path,
+        releaseDate: movie.release_date || "",
+        releaseYear: movie.release_date
+          ? new Date(movie.release_date).getFullYear()
+          : 0,
+        voteAverage: movie.vote_average,
+        voteCount: movie.vote_count,
+        genreIds: movie.genre_ids,
+      })),
+    };
+  },
+});
+
 export const searchMovies = action({
   args: { query: v.string(), page: v.optional(v.number()) },
   handler: async (ctx, args) => {
